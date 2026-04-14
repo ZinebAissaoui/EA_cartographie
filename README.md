@@ -24,12 +24,12 @@
 | 19  | ea_matomo_conversionperchannel_table | BigQuery | Maxime |
 | 20 | Espace Atypique_DATA_Pinterest - owned_pins | Google Sheets | EF Cybercité |
 | 21 | Espaces Atypiques - Data - TikTok - Video Data | Google Sheets | |
-| 22 | ea_matomo_pages | BigQuery | |
-| 23| Espace Atypiques - GSC - Merge - Web - Discover - Feuille 1 | Google Sheets | |
+| 22 | ea_matomo_pages | BigQuery | Maxime |
+| 23| Espace Atypiques - GSC - Merge - Web - Discover - Feuille 1 | Google Sheets | Analyste Cybercité  |
 | 24 | Espaces Atypiques - Data - Facebook - Page - Data | Google Sheets | |
-| 25 | ea_matomo_channel | BigQuery | |
-| 26 | Espaces Atypiques - Data - Instagram - Profil data | Google Sheets | |
-| 27 | ea_matomo_temps_moyen | BigQuery | |
+| 25 | ea_matomo_channel | BigQuery | Maxime |
+| 26 | Espaces Atypiques - Data - Instagram - Profil data | Google Sheets | analyse Cybercite |
+| 27 | ea_matomo_temps_moyen | BigQuery | Maxime |
 
 ---
 
@@ -448,8 +448,6 @@
 
 ---
 
----
-
 ## 2. [Sept - 25 - EA-local-Global](https://lookerstudio.google.com/u/0/reporting/a2d405ee-2e75-4d17-a89e-2c0144ab3d69/page/p_2txnjavkwd/edit)
 
 | # | Nom | Connecteur | Responsable |
@@ -529,6 +527,23 @@
 
 ---
 
+### matomo_global_local_table_NEW28102025
+- **Connecteur Looker Studio** : BigQuery
+- **Table BQ** : `matomo_extract.matomo_global_local_table_NEW28102025`
+- **Type** : Table native partitionnée
+- **Utilisateur** : e-f@amc.cybercite.fr — ⚠ mettre à jour les identifiants
+- **Ressource** : `68dcd9a2-0000-260c-86a0-3c286d40754e`
+- **Planification** : tous les jours à 05:00 UTC
+- **Schéma BQ** : date (DATE), deviceType (STRING), referrerTypeName (STRING), campaignMedium (STRING), campaignSource (STRING), campaignName (STRING), dimension5 (STRING), agence (STRING), id_visit (STRING), idVisitBounce (STRING), idpageview_home_agence (STRING), idpageview_annonce (STRING), click_mail (INTEGER), click_tel (INTEGER), form_vente (INTEGER), form_rappel_succes (INTEGER), visitDuration (INTEGER), actions (INTEGER)
+- **Alimentation** : Requête programmée BigQuery — `matomo_local_global`
+  - **Source lue** : `eng-ridge-440808-e7.matomo_extract.matomo_visits_new` (dédupliqué par idVisit via ROW_NUMBER)
+  - **Logique** : DELETE des 7 derniers jours puis INSERT
+  - **Blocs UNION ALL (10 blocs)** :
+    - **Niveau `total`** : visits + click_mail + click_tel + form_vendre_succes + form_rappel_succes (agence = `'total'`)
+    - **Niveau agence** : mêmes 5 blocs avec normalisation REGEXP de l'agence depuis `dimension1` ou URL
+  - **Normalisation agence** : REGEXP sur `dimension1` ou `url` → slug standardisé (ex. `agence_paris-rive-droite`). Remappages explicites pour les slugs ambigus (`aix-marseille`, `avignon`, `bourgogne`, etc.)
+  - **Événements trackés** : `click_mail`, `click_tel`, `form_vendre_succes`, `form_rappel_succes`
+
 ---
 
 ## 3. [EA-local-Paris Rive Droite](https://lookerstudio.google.com/u/0/reporting/75a0df69-d5c0-4992-b2fd-bb5bf464cc14/page/p_zewr8c5qzc/edit)
@@ -550,7 +565,9 @@
 
 ---
 
-## Détail des sources — EA-local-Paris Rive Droite
+## Détail des sources 📊 — EA-local-Paris Rive Droite
+
+> **Note Apps Script Add-on** : les sources connectées via Apps Script Add-on (Matomo) établissent une connexion directe entre Looker Studio et l'API Matomo. Il n'y a pas de flux de données intermédiaire (pas de Google Sheets ni de BigQuery) — aucune documentation de pipeline n'est nécessaire pour ces sources.
 
 ### EA Global - Matomo-Visites
 → Déjà documenté dans le Rapport 2 — *voir [section](#ea-global---matomo-visites)*
@@ -572,8 +589,8 @@
 ---
 
 ### EA-Local- Matomo Nego
-- **Connecteur Looker Studio** : Apps Script Add-on
-- À documenter
+- **Connecteur Looker Studio** : Apps Script Add-on (connexion directe API Matomo — pas de flux de données à documenter)
+- **Responsable** : Yann Raude-Lahore
 
 ---
 
@@ -585,20 +602,20 @@
 ---
 
 ### EA-Local- Matomo Event
-- **Connecteur Looker Studio** : Apps Script Add-on
-- À documenter
+- **Connecteur Looker Studio** : Apps Script Add-on (connexion directe API Matomo — pas de flux de données à documenter)
+- **Responsable** : Yann Raude-Lahore
 
 ---
 
 ### EA Local - Matomo Referal
-- **Connecteur Looker Studio** : Apps Script Add-on
-- À documenter
+- **Connecteur Looker Studio** : Apps Script Add-on (connexion directe API Matomo — pas de flux de données à documenter)
+- **Responsable** : Yann Raude-Lahore
 
 ---
 
 ### EA-local- Matomo Campagne
-- **Connecteur Looker Studio** : Apps Script Add-on
-- À documenter
+- **Connecteur Looker Studio** : Apps Script Add-on (connexion directe API Matomo — pas de flux de données à documenter)
+- **Responsable** : Yann Raude-Lahore
 
 ---
 
@@ -615,20 +632,20 @@
 ---
 
 ### EA-Local- Matomo Event (2e instance)
-- **Connecteur Looker Studio** : Apps Script Add-on
-- À documenter
+- **Connecteur Looker Studio** : Apps Script Add-on (connexion directe API Matomo — pas de flux de données à documenter)
+- **Responsable** : Yann Raude-Lahore
 
 ---
 
 ### EA-local - Matomo - Peripheriques
-- **Connecteur Looker Studio** : Apps Script Add-on
-- À documenter
+- **Connecteur Looker Studio** : Apps Script Add-on (connexion directe API Matomo — pas de flux de données à documenter)
+- **Responsable** : Yann Raude-Lahore
 
 ---
 
 ### EA local - Matomo - Visites
-- **Connecteur Looker Studio** : Apps Script Add-on
-- À documenter
+- **Connecteur Looker Studio** : Apps Script Add-on (connexion directe API Matomo — pas de flux de données à documenter)
+- **Responsable** : Yann Raude-Lahore
 
 ---
 
@@ -656,4 +673,7 @@
 | EA-Perf-Annonces-01 - Feuille 1 | — | Pas d'accès + URL manquante — demander à l'équipe EA | | En attente |
 | EA-Perf-Annonces-02 - Feuille 1 | — | Pas d'accès + URL manquante — demander à l'équipe EA | | En attente |
 | matomo_vues_annonces (requête programmée ea_matomo_vues_annonces) | — | Mettre à jour les identifiants de e-f@amc.cybercite.fr | EF Cybercité | ⚠ Action requise |
+
+
+
 
