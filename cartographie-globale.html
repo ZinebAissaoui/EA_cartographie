@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Espace Atypique — Cartographie globale</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/standalone/umd/vis-network.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f0f1a; color: #eee; overflow: hidden; }
+
+    header {
+      background: #1a1a2e; padding: 10px 20px;
+      display: flex; align-items: center; gap: 10px;
+      border-bottom: 1px solid #2e2e4e;
+    }
+    header h1 { font-size: 14px; font-weight: 600; }
+    header .sub { font-size: 10px; opacity: .4; margin-bottom: 2px; }
+
+    #controls {
+      display: flex; gap: 7px; padding: 7px 20px;
+      background: #13132a; border-bottom: 1px solid #2e2e4e;
+      align-items: center; flex-wrap: wrap;
+    }
+    .lbl { font-size: 11px; color: #666; margin-right: 2px; }
+    .btn {
+      padding: 5px 13px; border-radius: 5px; border: none;
+      cursor: pointer; font-size: 11px; font-weight: 600;
+      transition: opacity .15s, transform .1s, box-shadow .15s;
+    }
+    .btn:hover  { opacity: .82; transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn.on     { box-shadow: 0 0 0 2px #fff3, 0 0 12px 2px; }
+    .b1  { background: #6c63ff; color: #fff; }
+    .b2  { background: #00acc1; color: #fff; }
+    .b3  { background: #43a047; color: #fff; }
+    .ba  { background: #f9a825; color: #222; }
+    .bc  { background: #37474f; color: #fff; }
+
+    .legend {
+      display: flex; gap: 12px; padding: 5px 20px;
+      background: #0f0f1a; border-bottom: 1px solid #2e2e4e;
+      flex-wrap: wrap; align-items: center; font-size: 10px; color: #888;
+    }
+    .li { display: flex; align-items: center; gap: 4px; }
+    .dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+    .edot { width: 9px; height: 9px; border-radius: 2px; border: 2px solid #e53935; }
+
+    #network { width: 100%; height: calc(100vh - 90px); }
+
+    #tooltip {
+      position: fixed; background: #1e1e3a; color: #eee;
+      padding: 8px 12px; border-radius: 6px; font-size: 11px;
+      max-width: 260px; pointer-events: none; display: none; z-index: 100;
+      line-height: 1.55; box-shadow: 0 4px 20px rgba(0,0,0,.6);
+      border: 1px solid #3a3a6a;
+    }
+    #tooltip a { color: #7ec8e3; }
+
+    #hint {
+      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+      background: rgba(30,30,60,.9); border: 1px solid #3a3a6a;
+      padding: 6px 16px; border-radius: 18px; font-size: 11px; color: #888;
+      pointer-events: none; transition: opacity .5s; z-index: 50;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="sub">ESPACE ATYPIQUE — CARTOGRAPHIE GLOBALE</div>
+    <h1>Sources de données — 3 rapports Looker Studio</h1>
+  </div>
+</header>
+
+<div id="controls">
+  <span class="lbl">Rapports :</span>
+  <button class="btn b1" id="btn-R1" onclick="toggleFocus('R1')">📊 Rapport Global VF</button>
+  <button class="btn b2" id="btn-R2" onclick="toggleFocus('R2')">📊 EA-local-Global</button>
+  <button class="btn b3" id="btn-R3" onclick="toggleFocus('R3')">📊 Paris Rive Droite</button>
+  <span style="color:#2e2e4e;margin:0 4px">│</span>
+  <button class="btn ba" onclick="expandAll()">⊕ Tout déployer</button>
+  <button class="btn bc" onclick="collapseAll()">⊖ Vue d'ensemble</button>
+</div>
+
+<div class="legend">
+  <span class="li"><span class="dot" style="background:#6c63ff"></span>Rapport LS</span>
+  <span class="li"><span class="dot" style="background:#4285f4"></span>BigQuery</span>
+  <span class="li"><span class="dot" style="background:#34a853"></span>Google Sheets</span>
+  <span class="li"><span class="dot" style="background:#f9a825"></span>Supermetrics</span>
+  <span class="li"><span class="dot" style="background:#00acc1"></span>Apps Script / API directe</span>
+  <span class="li"><span class="dot" style="background:#78909c"></span>Search Console / GA4</span>
+  <span style="color:#2e2e4e">│</span>
+  <span class="li"><span class="edot"></span>⚠ Erreur</span>
+</div>
+
+<div id="network"></div>
+<div id="tooltip"></div>
+<div id="hint">Cliquez sur un rapport pour explorer ses sources →</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+//  CONFIG
+// ══════════════════════════════════════════════════════════════
+// LR direction: reports LEFT (small x), deeper sources RIGHT (large x)
+const LX = [-620, -370, -90, 190, 470, 750];
+
+const C = {
+  report:   { bg:'#6c63ff', bd:'#4a40cc', f:'#fff' },
+  bq:       { bg:'#2f6fe8', bd:'#1a4ab0', f:'#fff' },
+  sheets:   { bg:'#2e8b4a', bd:'#1d5e31', f:'#fff' },
+  sm:       { bg:'#e09000', bd:'#b07000', f:'#fff' },
+  appscript:{ bg:'#008fa8', bd:'#006070', f:'#fff' },
+  gsc:      { bg:'#607d8b', bd:'#37474f', f:'#fff' },
+};
+
+const REPORT_Y = { R1: -320, R2: 0, R3: 320 };
+const ANIM_MS  = 520;
+
+// ══════════════════════════════════════════════════════════════
+//  NODE BUILDERS
+// ══════════════════════════════════════════════════════════════
+function mkReport(id, label, y, url) {
+  const c = C.report;
+  return {
+    id, label, x: LX[0], y,
+    fixed: { x: true, y: true },
+    color: { background: c.bg, border: c.bd, highlight: { background: c.bg, border:'#fff' } },
+    borderWidth: 3,
+    font: { color:'#fff', size:12, face:'Segoe UI', bold:true },
+    shape:'box', margin:{top:9,bottom:9,left:14,right:14},
+    shadow:{enabled:true,size:10,x:3,y:3,color:'rgba(108,99,255,.45)'},
+    widthConstraint:{maximum:200}, url, _isReport:true, _report:id,
+  };
+}
+
+function mkNode(id, label, type, lv, y, opts={}) {
+  const c = C[type];
+  const err = !!opts.error;
+  return {
+    id, label,
+    x: LX[lv] ?? (LX[0] + lv*280),
+    y,
+    fixed: { x: true, y: false },
+    color: {
+      background: c.bg,
+      border: err ? '#e53935' : c.bd,
+      highlight: { background: c.bg, border:'#fff' }
+    },
+    borderWidth: err ? 3 : 2,
+    font: { color: c.f, size: 10, face:'Segoe UI' },
+    shape:'box', margin:{top:5,bottom:5,left:9,right:9},
+    shadow:{enabled:true,size:5,x:2,y:2,color:'rgba(0,0,0,.35)'},
+    widthConstraint:{maximum:175},
+    url: opts.url||null, tooltip: opts.tooltip||null,
+    _report: opts.report||null, _lv: lv,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  DATA — R1 : Rapport Global VF
+// ══════════════════════════════════════════════════════════════
+const R1_LAYERS = [
+  /* L1 */ [
+    {id:'R1_GSC1', lb:'GSC - EA - Site\n(Search Console)',          t:'gsc'},
+    {id:'R1_GSC2', lb:'GSC - EA_Url\n(Search Console)',             t:'gsc'},
+    {id:'R1_GSC3', lb:'GSC - EA_Discover\n(Search Console)',        t:'gsc'},
+    {id:'R1_GA4',  lb:'Portail National & Agences\n(GA4)',          t:'gsc'},
+    {id:'R1_GLOS', lb:'Glossaire - Feuille 1\n(Google Sheets)',     t:'sheets', e:1, tip:'⚠ Pas d\'accès en modification'},
+    {id:'R1_BQP2', lb:'ea_matomo_pages_2\n(BigQuery)',              t:'bq'},
+    {id:'R1_BQCTR',lb:'ea_matomo_country_maj\n(Google Sheets)',     t:'sheets', url:'https://docs.google.com/spreadsheets/d/1p6BS3vdq4e48n6uPc0wVAsg5_TqtDxg1daxlxQpRxe4'},
+    {id:'R1_BQREG',lb:'ea_matomo_region\n(BigQuery)',               t:'bq'},
+    {id:'R1_BQDEV',lb:'ea_matomo_device\n(BigQuery)',               t:'bq'},
+    {id:'R1_BQCH', lb:'ea_matomo_channel\n(BigQuery)',              t:'bq'},
+    {id:'R1_BQPG', lb:'ea_matomo_pages\n(BigQuery)',                t:'bq'},
+    {id:'R1_BQTM', lb:'ea_matomo_temps_moyen\n(BigQuery)',          t:'bq'},
+    {id:'R1_BQCV', lb:'ea_matomo_conversion\nperchannel_table (BQ)',t:'bq', e:1, tip:'⚠ Credentials e-f@amc.cybercite.fr'},
+    {id:'R1_BQSS', lb:'ea_total_sessions_vs\nobjectif_table (BQ)', t:'bq', e:1, tip:'⚠ Credentials e-f@amc.cybercite.fr'},
+    {id:'R1_FB',   lb:'Facebook - Data\n(Google Sheets)',           t:'sheets', url:'https://docs.google.com/spreadsheets/d/1_q_s0yfdKM4hVuOTlXIOloWEHb866zm-x1lPpM458Pw'},
+    {id:'R1_TK',   lb:'TikTok - Data\n(Google Sheets)',             t:'sheets', url:'https://docs.google.com/spreadsheets/d/15tAm1BB5QubklIy7MzWMQpcHLFT0gMBZOeXMsD8vfBE'},
+    {id:'R1_IG',   lb:'Instagram - Data\n(Google Sheets)',          t:'sheets', e:1, url:'https://docs.google.com/spreadsheets/d/1f9vZ22CeY3iNphK_HGQiATZAAadLqsfUVjHx4Ss4G4A', tip:'⚠ Reconnexion Instagram Insights requise'},
+    {id:'R1_PT',   lb:'Pinterest - Data\n(Google Sheets)',          t:'sheets', e:1, url:'https://docs.google.com/spreadsheets/d/19suEgJnbHc98Snx3dB01vcBDxgJc7jkoHU9eVpqEDo8', tip:'⚠ Pinterest Organic Forbidden'},
+    {id:'R1_LI',   lb:'LinkedIn - Data\n(Google Sheets)',           t:'sheets', url:'https://docs.google.com/spreadsheets/d/1fsfkpQWxCob-Hbly96c5kYvqHvgwGeHCYyrUKRO9LE0'},
+    {id:'R1_GSCM', lb:'GSC - Merge Web/Discover\n(Google Sheets)', t:'sheets', url:'https://docs.google.com/spreadsheets/d/1Ubb1yL_Po9aP3P_mMakSU7gtY2vP4gdBwGN6s2Om5qQ'},
+  ],
+  /* L2 */ [
+    {id:'R1_GS_P2',  pid:'R1_BQP2',  lb:'page_view!A2:D\n(Google Sheets)',             t:'sheets', e:1, tip:'⚠ Pas d\'accès'},
+    {id:'R1_GS_CTR', pid:'R1_BQCTR', lb:'Pays et régions — country\n(Google Sheets)',  t:'sheets'},
+    {id:'R1_GS_DEV', pid:'R1_BQDEV', lb:'matomo_device!A2:F\n(Google Sheets)',         t:'sheets', e:1, tip:'⚠ Pas d\'accès'},
+    {id:'R1_GS_CH',  pid:'R1_BQCH',  lb:'Acquisition\n(Google Sheets)',                t:'sheets'},
+    {id:'R1_GS_PG',  pid:'R1_BQPG',  lb:'Feuille pages\n(Google Sheets)',              t:'sheets', e:1, tip:'⚠ Pas d\'accès'},
+    {id:'R1_GS_TM',  pid:'R1_BQTM',  lb:'Feuille temps moyen\n(Google Sheets)',        t:'sheets', e:1, tip:'⚠ Pas d\'accès'},
+    {id:'R1_GRVCL1', pid:'R1_BQCV',  lb:'ea_gravityform_clean_table\n(BigQuery)',      t:'bq', e:1, tip:'⚠ Credentials'},
+    {id:'R1_OBJ1',   pid:'R1_BQCV',  lb:'ea_objectifs_maj\n(BigQuery)',                t:'bq', tip:'Saisie manuelle probable'},
+    {id:'R1_GRVCL2', pid:'R1_BQSS',  lb:'ea_gravityform_clean_table\n(BigQuery)',      t:'bq', e:1, tip:'⚠ Credentials'},
+    {id:'R1_SOC',    pid:'R1_BQSS',  lb:'ea_matomo_social_network\n(BigQuery)',        t:'bq'},
+    {id:'R1_CAMP',   pid:'R1_BQSS',  lb:'ea_matomo_campaigns_maj\n(BigQuery)',         t:'bq'},
+    {id:'R1_OBJ2',   pid:'R1_BQSS',  lb:'ea_objectifs_maj\n(BigQuery)',                t:'bq', tip:'Saisie manuelle probable'},
+    {id:'R1_BUD',    pid:'R1_BQSS',  lb:'ea_budget_cout_maj\n(BigQuery)',              t:'bq', tip:'Saisie manuelle probable'},
+    {id:'R1_FBPO',   pid:'R1_FB',    lb:'post data\n(Google Sheets)',                  t:'sheets'},
+    {id:'R1_FBPG',   pid:'R1_FB',    lb:'Page - Data\n(Google Sheets)',                t:'sheets', e:1, tip:'⚠ Accès Facebook page ID'},
+    {id:'R1_TKGL',   pid:'R1_TK',    lb:'Global data\n(Google Sheets)',                t:'sheets'},
+    {id:'R1_TKVI',   pid:'R1_TK',    lb:'Video Data\n(Google Sheets)',                 t:'sheets'},
+    {id:'R1_IGPO',   pid:'R1_IG',    lb:'Post data organique\n(Google Sheets)',        t:'sheets', e:1},
+    {id:'R1_IGIM',   pid:'R1_IG',    lb:'Profile impressions\n(Google Sheets)',        t:'sheets', e:1},
+    {id:'R1_IGPR',   pid:'R1_IG',    lb:'Profil data\n(Google Sheets)',                t:'sheets', e:1},
+    {id:'R1_PTOK',   pid:'R1_PT',    lb:'Pinterest_ok\n(Google Sheets)',               t:'sheets', e:1},
+    {id:'R1_PTTP',   pid:'R1_PT',    lb:'pinterest_top_pins\n(Google Sheets)',         t:'sheets', e:1},
+    {id:'R1_PTOW',   pid:'R1_PT',    lb:'owned_pins\n(Google Sheets)',                 t:'sheets', e:1},
+    {id:'R1_LIDA',   pid:'R1_LI',    lb:'Data content_Linkedin\n(Google Sheets)',      t:'sheets'},
+    {id:'R1_GSGSC',  pid:'R1_GSCM',  lb:'Feuille 1\n(Google Sheets)',                 t:'sheets'},
+  ],
+  /* L3 */ [
+    {id:'R1_SMMA',  pid:'R1_GS_CTR', lb:'Supermetrics Matomo\n(MATO)',                t:'sm'},
+    {id:'R1_ASCH',  pid:'R1_GS_CH',  lb:'App Script → Matomo\nReferrers.getReferrerType', t:'appscript'},
+    {id:'R1_GRVAL1',pid:'R1_GRVCL1', lb:'ea_matomo_gravity_form_all\n(BigQuery)',     t:'bq', e:1},
+    {id:'R1_GSOB1', pid:'R1_OBJ1',   lb:'objectifs_optimistes\n(Google Sheets)',      t:'sheets', tip:'Saisie manuelle'},
+    {id:'R1_GRVAL2',pid:'R1_GRVCL2', lb:'ea_matomo_gravity_form_all\n(BigQuery)',     t:'bq', e:1},
+    {id:'R1_GSOB2', pid:'R1_OBJ2',   lb:'objectifs_optimistes\n(Google Sheets)',      t:'sheets', tip:'Saisie manuelle'},
+    {id:'R1_ASSO',  pid:'R1_SOC',    lb:'App Script → Matomo\nReferrers.getSocials', t:'appscript'},
+    {id:'R1_ASCA',  pid:'R1_CAMP',   lb:'App Script → Matomo\nMarketingCampaigns',   t:'appscript'},
+    {id:'R1_GSBU',  pid:'R1_BUD',    lb:'budget_cout_source\n(Google Sheets)',        t:'sheets', tip:'Saisie manuelle probable'},
+    {id:'R1_SMFB',  pid:'R1_FBPO',   lb:'Supermetrics Facebook\n(FB)',               t:'sm'},
+    {id:'R1_SMTK',  pid:'R1_TKGL',   lb:'Supermetrics TikTok\nBusiness (TIKBA)',     t:'sm'},
+    {id:'R1_SMIG',  pid:'R1_IGPO',   lb:'Supermetrics Instagram\nInsights (IGI)',    t:'sm', e:1, tip:'⚠ Reconnexion requise'},
+    {id:'R1_SMPT',  pid:'R1_PTOK',   lb:'Supermetrics Pinterest\nOrganic (PIO2)',    t:'sm', e:1, tip:'⚠ Forbidden'},
+    {id:'R1_SMLI',  pid:'R1_LIDA',   lb:'Supermetrics LinkedIn\nPages (LIP)',        t:'sm'},
+    {id:'R1_SMGW',  pid:'R1_GSGSC',  lb:'Supermetrics Search\nConsole (GW)',         t:'sm'},
+  ],
+  /* L4 */ [
+    {id:'R1_GRVM1', pid:'R1_GRVAL1', lb:'ea_gravity_form_maj\n(BigQuery)', t:'bq', e:1},
+    {id:'R1_GRVM2', pid:'R1_GRVAL2', lb:'ea_gravity_form_maj\n(BigQuery)', t:'bq', e:1},
+  ],
+  /* L5 */ [
+    {id:'R1_GSGR1', pid:'R1_GRVM1', lb:'Gravity Forms\n(Google Sheets)', t:'sheets', e:1, tip:'⚠ Pas d\'accès'},
+    {id:'R1_GSGR2', pid:'R1_GRVM2', lb:'Gravity Forms\n(Google Sheets)', t:'sheets', e:1, tip:'⚠ Pas d\'accès'},
+  ],
+];
+const R1_XEDGE = [
+  {from:'R1_FBPG',to:'R1_SMFB'},{from:'R1_TKVI',to:'R1_SMTK'},
+  {from:'R1_IGIM',to:'R1_SMIG'},{from:'R1_IGPR',to:'R1_SMIG'},
+  {from:'R1_PTTP',to:'R1_SMPT'},{from:'R1_PTOW',to:'R1_SMPT'},
+];
+
+// ══════════════════════════════════════════════════════════════
+//  DATA — R2 : Sept-25-EA-local-Global
+// ══════════════════════════════════════════════════════════════
+const R2_LAYERS = [
+  /* L1 */ [
+    {id:'R2_GA4',  lb:'Portail National & Agences\n(GA4)',              t:'gsc'},
+    {id:'R2_GSC',  lb:'Search Console\nespaces-atypiques.com',          t:'gsc'},
+    {id:'R2_ASGL', lb:'EA Global - Matomo-Visites\n(Apps Script Addon)',t:'appscript', tip:'Connexion directe API Matomo — Pauline Alloin'},
+    {id:'R2_ACT',  lb:'matomo_actions_table\nNEW28102025 (BigQuery)',   t:'bq', e:1, tip:'⚠ Credentials e-f@amc.cybercite.fr'},
+    {id:'R2_DUR',  lb:'matomo_duree_table\nNEW28102025 (BigQuery)',     t:'bq', e:1, tip:'⚠ Credentials e-f@amc.cybercite.fr'},
+    {id:'R2_CVA',  lb:'matomo_conversions_annonces\nNEW28102025 (BQ)', t:'bq', e:1, tip:'⚠ Credentials e-f@amc.cybercite.fr'},
+    {id:'R2_GBL',  lb:'matomo_global_local_table\nNEW28102025 (BQ)',   t:'bq', e:1, tip:'⚠ Credentials e-f@amc.cybercite.fr'},
+    {id:'R2_CHR',  lb:'ea_matomo_channel_maj\n(BQ) → voir Rapport global',       t:'bq'},
+    {id:'R2_TMR',  lb:'ea_matomo_temps_moyen\n(BQ) → voir Rapport global',       t:'bq'},
+    {id:'R2_SSR',  lb:'ea_total_sessions_vs_objectif\n(BQ) → voir Rapport global',t:'bq', e:1},
+  ],
+  /* L2 */ [
+    {id:'R2_GREF1',pid:'R2_ACT', lb:'→ matomo_global_local_table', t:'bq', tip:'Déjà présente au niveau 1'},
+    {id:'R2_GREF2',pid:'R2_DUR', lb:'→ matomo_global_local_table', t:'bq', tip:'Déjà présente au niveau 1'},
+    {id:'R2_VIS',  pid:'R2_CVA', lb:'matomo_visits_new\n(BigQuery)\neng-ridge-440808-e7\n.matomo_extract', t:'bq'},
+  ],
+];
+const R2_XEDGE = [{from:'R2_GBL', to:'R2_VIS'}];
+
+// ══════════════════════════════════════════════════════════════
+//  DATA — R3 : EA-local-Paris Rive Droite
+// ══════════════════════════════════════════════════════════════
+const R3_LAYERS = [
+  /* L1 */ [
+    {id:'R3_ASGL',lb:'EA Global - Matomo-Visites\n(Apps Script Addon)',       t:'appscript', tip:'API Matomo directe — Yann Raude-Lahore'},
+    {id:'R3_ASNG',lb:'EA-Local - Matomo Nego\n(Apps Script Addon)',           t:'appscript', tip:'API Matomo directe — Yann Raude-Lahore'},
+    {id:'R3_ASEV',lb:'EA-Local - Matomo Event\n(Apps Script Addon)',          t:'appscript', tip:'API Matomo directe — Yann Raude-Lahore'},
+    {id:'R3_ASRF',lb:'EA Local - Matomo Referal\n(Apps Script Addon)',        t:'appscript', tip:'API Matomo directe — Yann Raude-Lahore'},
+    {id:'R3_ASCP',lb:'EA-local - Matomo Campagne\n(Apps Script Addon)',       t:'appscript', tip:'API Matomo directe — Yann Raude-Lahore'},
+    {id:'R3_ASE2',lb:'EA-Local - Matomo Event (2e)\n(Apps Script Addon)',     t:'appscript', tip:'API Matomo directe — Yann Raude-Lahore'},
+    {id:'R3_ASPE',lb:'EA-local - Matomo Périphériques\n(Apps Script Addon)', t:'appscript', tip:'API Matomo directe — Yann Raude-Lahore'},
+    {id:'R3_ASVI',lb:'EA local - Matomo Visites\n(Apps Script Addon)',        t:'appscript', tip:'API Matomo directe — Yann Raude-Lahore'},
+    {id:'R3_BQVU',lb:'matomo_vues_annonces\n(BigQuery)',                      t:'bq', e:1, tip:'⚠ Mettre à jour identifiants e-f@amc.cybercite.fr'},
+    {id:'R3_GSP1',lb:'EA-Perf-Annonces-01\nFeuille 1 (Google Sheets)',       t:'sheets', e:1, tip:'⚠ Pas d\'accès + URL manquante'},
+    {id:'R3_GSP2',lb:'EA-Perf-Annonces-02\nFeuille 1 (Google Sheets)',       t:'sheets', e:1, tip:'⚠ Pas d\'accès + URL manquante'},
+    {id:'R3_GSC', lb:'Search Console\nespaces-atypiques.com',                 t:'gsc', tip:'No edit access'},
+  ],
+  /* L2 */ [
+    {id:'R3_VIS', pid:'R3_BQVU', lb:'matomo_visits_new\n(BigQuery)\neng-ridge-440808-e7\n.matomo_extract', t:'bq'},
+  ],
+];
+const R3_XEDGE = [];
+
+// ══════════════════════════════════════════════════════════════
+//  REPORT INDEX
+// ══════════════════════════════════════════════════════════════
+const REPORTS = {
+  R1: { y:REPORT_Y.R1, label:'📊 Rapport Global VF\n(CYB × EA)',
+        url:'https://lookerstudio.google.com/u/0/reporting/0fd3451b-1665-4d47-9d63-e9ea26fd15df/page/p_xruw101tud/edit',
+        layers:R1_LAYERS, xedge:R1_XEDGE },
+  R2: { y:REPORT_Y.R2, label:'📊 Sept-25 EA-local-Global',
+        url:'https://lookerstudio.google.com/u/0/reporting/a2d405ee-2e75-4d17-a89e-2c0144ab3d69/page/p_2txnjavkwd/edit',
+        layers:R2_LAYERS, xedge:R2_XEDGE },
+  R3: { y:REPORT_Y.R3, label:'📊 EA-local-Paris Rive Droite',
+        url:'https://lookerstudio.google.com/u/0/reporting/75a0df69-d5c0-4992-b2fd-bb5bf464cc14/page/p_zewr8c5qzc/edit',
+        layers:R3_LAYERS, xedge:R3_XEDGE },
+};
+
+// ══════════════════════════════════════════════════════════════
+//  TREE LAYOUT — pre-compute Y for every node of a report
+// ══════════════════════════════════════════════════════════════
+function computeTreeY(rid) {
+  const R = REPORTS[rid];
+  const ch = {}; // id → [childIds]
+  ch[rid] = [];
+  R.layers.forEach(layer => {
+    layer.forEach(nd => {
+      const pid = nd.pid || rid;
+      if (!ch[pid]) ch[pid] = [];
+      ch[pid].push(nd.id);
+      if (!ch[nd.id]) ch[nd.id] = [];
+    });
+  });
+  // leaf count
+  const lc = {};
+  function leaves(id) {
+    const kids = ch[id]||[];
+    if (!kids.length) { lc[id]=1; return 1; }
+    lc[id] = kids.reduce((s,c)=>s+leaves(c), 0);
+    return lc[id];
+  }
+  leaves(rid);
+
+  const LEAF_H = 100; // px per leaf slot
+  const total  = lc[rid] * LEAF_H;
+  const centY  = R.y;
+  const yTop   = centY - total/2;
+  const yBot   = centY + total/2;
+
+  const yPos = {};
+  function assign(id, t, b) {
+    yPos[id] = (t+b)/2;
+    const kids = ch[id]||[];
+    let cur = t;
+    kids.forEach(kid => {
+      const h = (lc[kid]/lc[id]) * (b-t);
+      assign(kid, cur, cur+h);
+      cur += h;
+    });
+  }
+  assign(rid, yTop, yBot);
+  yPos[rid] = centY; // keep report node fixed
+  return yPos;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  VIS.JS INIT
+// ══════════════════════════════════════════════════════════════
+const nodesDS = new vis.DataSet([
+  mkReport('R1', REPORTS.R1.label, REPORTS.R1.y, REPORTS.R1.url),
+  mkReport('R2', REPORTS.R2.label, REPORTS.R2.y, REPORTS.R2.url),
+  mkReport('R3', REPORTS.R3.label, REPORTS.R3.y, REPORTS.R3.url),
+]);
+const edgesDS = new vis.DataSet([]);
+
+const network = new vis.Network(
+  document.getElementById('network'),
+  { nodes: nodesDS, edges: edgesDS },
+  {
+    layout: { hierarchical: { enabled: false } },
+    physics: { enabled: false },
+    edges: {
+      arrows: { to: { enabled:true, scaleFactor:0.52 } },
+      color: { color:'#2a2a4a', highlight:'#6c63ff' },
+      smooth: { type:'cubicBezier', forceDirection:'horizontal', roundness:0.4 },
+      width: 1.2,
+    },
+    nodes: { borderWidth:2 },
+    interaction: { hover:true, navigationButtons:true, keyboard:true, zoomView:true },
+  }
+);
+
+setTimeout(() => network.fit({ animation:{ duration:500, easingFunction:'easeInOutQuad' } }), 200);
+
+// ══════════════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════════════
+let currentFocus = null;   // currently expanded report id or null
+let expanding    = false;  // animation in progress
+const rNodes = { R1:[], R2:[], R3:[] };  // list of added node ids
+const rEdges = { R1:[], R2:[], R3:[] };  // list of added edge ids
+
+// ══════════════════════════════════════════════════════════════
+//  ANIMATE — smooth Y interpolation via requestAnimationFrame
+// ══════════════════════════════════════════════════════════════
+function animateY(items, duration, onDone) {
+  // items: [{id, startY, endY}]
+  const t0 = performance.now();
+  function frame(now) {
+    const t = Math.min((now - t0) / duration, 1);
+    const e = t < .5 ? 2*t*t : -1+(4-2*t)*t; // easeInOut
+    nodesDS.update(items.map(({id, startY, endY}) => ({
+      id, y: startY + (endY - startY) * e
+    })));
+    if (t < 1) requestAnimationFrame(frame);
+    else if (onDone) onDone();
+  }
+  requestAnimationFrame(frame);
+}
+
+// ══════════════════════════════════════════════════════════════
+//  EXPAND — add one layer, animate to pre-computed Y positions
+// ══════════════════════════════════════════════════════════════
+function addLayer(rid, layerIdx, yPos, onDone) {
+  const layer = REPORTS[rid].layers[layerIdx];
+  const lv    = layerIdx + 1;
+
+  // Group by parent to get parent Y
+  const byPid = {};
+  layer.forEach(nd => {
+    const pid = nd.pid || rid;
+    (byPid[pid] = byPid[pid]||[]).push(nd);
+  });
+
+  const addedNodes = [];
+  const animItems  = [];
+  const addedEdges = [];
+
+  Object.entries(byPid).forEach(([pid, siblings]) => {
+    const pPos = network.getPosition(pid);
+    const pY   = pPos ? pPos.y : REPORTS[rid].y;
+
+    siblings.forEach(nd => {
+      const node = mkNode(nd.id, nd.lb, nd.t, lv, pY, {
+        error: !!nd.e, url: nd.url, tooltip: nd.tip, report: rid
+      });
+      addedNodes.push(node);
+      animItems.push({ id: nd.id, startY: pY, endY: yPos[nd.id] ?? pY });
+
+      const eid = `e_${pid}_${nd.id}`;
+      addedEdges.push({ id: eid, from: pid, to: nd.id });
+      rNodes[rid].push(nd.id);
+      rEdges[rid].push(eid);
+    });
+  });
+
+  // Add extra cross-edges for this layer (last layer)
+  if (layerIdx === REPORTS[rid].layers.length - 1) {
+    REPORTS[rid].xedge.forEach(ex => {
+      if (rNodes[rid].includes(ex.to)) {
+        const eid = `xe_${ex.from}_${ex.to}`;
+        addedEdges.push({ id: eid, from: ex.from, to: ex.to,
+          dashes: true, color:{ color:'#3a3a5a' } });
+        rEdges[rid].push(eid);
+      }
+    });
+  }
+
+  nodesDS.add(addedNodes);
+  edgesDS.add(addedEdges);
+
+  // Animate Y to pre-computed positions
+  animateY(animItems, ANIM_MS, onDone);
+}
+
+// ══════════════════════════════════════════════════════════════
+//  EXPAND ALL LAYERS — layer by layer with pause between
+// ══════════════════════════════════════════════════════════════
+function expandAllLayers(rid, yPos) {
+  const layers = REPORTS[rid].layers;
+  let idx = 0;
+
+  function next() {
+    if (idx >= layers.length) {
+      // Done
+      expanding = false;
+      network.fit({ animation:{ duration:700, easingFunction:'easeInOutQuad' } });
+      setBtn(rid, 'on');
+      return;
+    }
+    addLayer(rid, idx, yPos, () => {
+      idx++;
+      setTimeout(next, 220); // small pause between layers
+    });
+  }
+  next();
+}
+
+// ══════════════════════════════════════════════════════════════
+//  FOCUS / COLLAPSE
+// ══════════════════════════════════════════════════════════════
+function focusReport(rid) {
+  if (expanding) return;
+  expanding = true;
+  currentFocus = rid;
+
+  // Hide other reports
+  ['R1','R2','R3'].filter(r => r !== rid).forEach(r => {
+    nodesDS.update({ id: r, hidden: true });
+  });
+
+  // Update report label
+  nodesDS.update({ id: rid, label: REPORTS[rid].label.replace('📊','⟳') });
+  setBtn(rid, 'loading');
+
+  // Compute tree Y positions
+  const yPos = computeTreeY(rid);
+
+  // Zoom to report first, then start expanding
+  network.fit({ nodes:[rid], animation:{ duration:300, easingFunction:'easeInOutQuad' } });
+  setTimeout(() => expandAllLayers(rid, yPos), 350);
+}
+
+function collapseReport(rid) {
+  if (expanding) return;
+
+  // Remove nodes and edges
+  rEdges[rid].forEach(id => { try { edgesDS.remove(id); } catch(e){} });
+  rNodes[rid].forEach(id => { try { nodesDS.remove(id); } catch(e){} });
+  rNodes[rid] = [];
+  rEdges[rid] = [];
+
+  // Show other reports
+  ['R1','R2','R3'].forEach(r => nodesDS.update({ id: r, hidden: false, label: REPORTS[r].label }));
+
+  currentFocus = null;
+  setBtn(rid, 'off');
+  network.fit({ animation:{ duration:600, easingFunction:'easeInOutQuad' } });
+}
+
+function toggleFocus(rid) {
+  if (expanding) return;
+  if (currentFocus === rid) {
+    // Already expanded — collapse
+    collapseReport(rid);
+  } else if (currentFocus !== null) {
+    // Another is expanded — collapse it first, then expand this one
+    const prev = currentFocus;
+    collapseReport(prev);
+    setTimeout(() => focusReport(rid), 650);
+  } else {
+    focusReport(rid);
+  }
+}
+
+function expandAll() {
+  if (expanding || currentFocus) return;
+  toggleFocus('R1');
+}
+
+function collapseAll() {
+  if (expanding) return;
+  if (currentFocus) collapseReport(currentFocus);
+  else {
+    ['R1','R2','R3'].forEach(r => {
+      rEdges[r].forEach(id => { try { edgesDS.remove(id); } catch(e){} });
+      rNodes[r].forEach(id => { try { nodesDS.remove(id); } catch(e){} });
+      rNodes[r] = []; rEdges[r] = [];
+    });
+    ['R1','R2','R3'].forEach(r => nodesDS.update({ id:r, hidden:false, label:REPORTS[r].label }));
+    ['R1','R2','R3'].forEach(r => setBtn(r, 'off'));
+    network.fit({ animation:{ duration:600, easingFunction:'easeInOutQuad' } });
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  BUTTON STATES
+// ══════════════════════════════════════════════════════════════
+const BTN_LABELS = {
+  R1:['📊 Rapport Global VF', '⟳ Rapport Global VF', '⊖ Rapport Global VF'],
+  R2:['📊 EA-local-Global',   '⟳ EA-local-Global',   '⊖ EA-local-Global'],
+  R3:['📊 Paris Rive Droite', '⟳ Paris Rive Droite', '⊖ Paris Rive Droite'],
+};
+function setBtn(rid, state) {
+  const el = document.getElementById('btn-' + rid);
+  if (!el) return;
+  const [off, loading, on] = BTN_LABELS[rid];
+  el.textContent = state === 'loading' ? loading : state === 'on' ? on : off;
+  el.classList.toggle('on', state === 'on');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  TOOLTIP + EVENTS
+// ══════════════════════════════════════════════════════════════
+const tipEl  = document.getElementById('tooltip');
+const hintEl = document.getElementById('hint');
+let hintHidden = false;
+
+network.on('hoverNode', p => {
+  const nd = nodesDS.get(p.node);
+  if (!nd) return;
+  const clean = (nd.label||'').replace(/→.*\n?/g,'').replace(/⟳|⊖|📊/g,'').trim();
+  let html = `<strong>${clean.replace(/\n/g,'<br>')}</strong>`;
+  if (nd.tooltip) html += `<br><span style="color:#f9a825">${nd.tooltip}</span>`;
+  if (nd.url)     html += `<br><a href="${nd.url}" target="_blank" style="margin-top:4px;display:inline-block">Ouvrir →</a>`;
+  tipEl.innerHTML = html;
+  tipEl.style.display = 'block';
+  network.selectNodes([p.node]);
+});
+network.on('blurNode', () => { tipEl.style.display='none'; network.unselectAll(); });
+document.addEventListener('mousemove', e => {
+  tipEl.style.left = (e.clientX+15)+'px';
+  tipEl.style.top  = (e.clientY+10)+'px';
+});
+
+network.on('click', p => {
+  if (!hintHidden) { hintEl.style.opacity='0'; hintHidden=true; }
+  if (p.nodes.length === 0) return;
+  const nd = nodesDS.get(p.nodes[0]);
+  if (!nd) return;
+  if (nd._isReport) toggleFocus(nd.id);
+  else if (nd.url) window.open(nd.url, '_blank');
+});
+</script>
+</body>
+</html>
